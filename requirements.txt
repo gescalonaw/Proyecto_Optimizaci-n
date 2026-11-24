@@ -1,0 +1,5 @@
+gurobipy
+docplex
+cplex
+pandas
+matplotlib

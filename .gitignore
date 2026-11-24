@@ -1,0 +1,20 @@
+# credenciales y licencias: NUNCA al repo
+.env
+*.lic
+gurobi.lic
+credenciales*
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+# salidas pesadas de las corridas (se suben solo las tablas finales)
+resultados/logs/*.log
+resultados/soluciones/
+*.sol
+*.lp
+*.mps
+# sistema
+.DS_Store
+Thumbs.db
+desktop.ini
