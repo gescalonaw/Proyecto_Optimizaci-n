@@ -79,6 +79,53 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     return m, x
 
 
+# codigos de estado de CPLEX
+ESTADOS = {101: "OPTIMO", 102: "OPTIMO", 107: "LIMITE_TIEMPO", 108: "SIN_SOLUCION",
+           103: "INFACTIBLE", 119: "INFACTIBLE"}
+
+
+def resolver(inst, nombre, tiempo, hilos, gap=0.0, solo_duras=False, mostrar=True):
+    """Arma y resuelve el modelo. Devuelve un diccionario con los resultados (lo usa src/correr.py)."""
+    t0 = time.time()
+    m, x = construir_modelo(inst, nombre, solo_duras)
+    t_modelo = time.time() - t0
+    m.set_time_limit(tiempo)
+    m.parameters.threads = hilos
+    m.parameters.mip.tolerances.mipgap = gap
+    if mostrar:
+        print(f"{nombre}: {m.number_of_variables} variables, {m.number_of_constraints} restricciones")
+
+    t0 = time.time()
+    with open(ruta_log(nombre, "cplex"), "w", encoding="utf-8") as log:
+        s = m.solve(log_output=log)
+    seg = time.time() - t0
+    det = m.solve_details
+
+    estado = ESTADOS.get(det.status_code, f"STATUS_{det.status_code}")
+    sol = []
+    if s is not None:
+        P = inst["Periods_per_day"]
+        sol = [(c, r, t // P, t % P) for (c, r, t), var in x.items() if s.get_value(var) > 0.5]
+    try:
+        cota = det.best_bound
+    except Exception:
+        cota = None
+    return {
+        "solver": "cplex",
+        "version": m.get_cplex().get_version(),
+        "estado": estado,
+        "tiempo_s": seg,
+        "tiempo_modelo_s": t_modelo,
+        "objetivo": s.objective_value if s is not None else None,
+        "cota": cota,
+        "gap": det.mip_relative_gap if s is not None else None,
+        "nodos": int(det.nb_nodes_processed or 0),
+        "variables": m.number_of_variables,
+        "restricciones": m.number_of_constraints,
+        "solucion": sol,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description="CB-CTT en CPLEX")
     ap.add_argument("instancia", help="ruta al archivo .ctt")
@@ -90,30 +137,14 @@ def main():
 
     inst = leer_ctt(args.instancia)
     nombre = Path(args.instancia).stem
-    m, x = construir_modelo(inst, nombre, args.solo_duras)
-    m.set_time_limit(args.tiempo)
-    m.parameters.threads = args.hilos
-    m.parameters.mip.tolerances.mipgap = args.gap
-
-    print(f"{nombre}: {m.number_of_variables} variables, {m.number_of_constraints} restricciones")
-    t0 = time.time()
-    with open(ruta_log(nombre, "cplex"), "w", encoding="utf-8") as log:
-        s = m.solve(log_output=log)
-    seg = time.time() - t0
-    det = m.solve_details
-
-    if s is None:
-        print(f"\n{nombre} [cplex]: sin solucion ({det.status}) en {seg:.1f} s")
+    r = resolver(inst, nombre, args.tiempo, args.hilos, args.gap, args.solo_duras)
+    if not r["solucion"]:
+        print(f"\n{nombre} [cplex]: {r['estado']} en {r['tiempo_s']:.1f} s")
         return
-
-    P = inst["Periods_per_day"]
-    sol = [(c, r, t // P, t % P) for (c, r, t), var in x.items() if s.get_value(var) > 0.5]
-    ruta = guardar_solucion(sol, nombre, "cplex")
-    gap = det.mip_relative_gap if det.mip_relative_gap is not None else 0.0
-    print(f"\n{nombre} [cplex]  estado={det.status}  objetivo={s.objective_value:.0f}  "
-          f"cota={det.best_bound:.2f}  gap={100 * gap:.2f}%  tiempo={seg:.1f}s")
+    ruta = guardar_solucion(r["solucion"], nombre, "cplex")
+    print(f"\n{nombre} [cplex]  estado={r['estado']}  objetivo={r['objetivo']:.0f}  cota={r['cota']:.2f}  "
+          f"gap={100 * r['gap']:.2f}%  tiempo={r['tiempo_s']:.1f}s")
     print(f"Revisala con:  python src/verificar.py {args.instancia} {ruta.relative_to(ruta.parents[2]).as_posix()}")
-
 
 if __name__ == "__main__":
     main()
