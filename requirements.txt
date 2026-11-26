@@ -1,5 +1,9 @@
-gurobipy
+# gurobipy: usar la MISMA version mayor que su licencia (ej. licencia 13 -> gurobipy==13.*)
+gurobipy==13.*
+# cplex: despues de instalar, correr una vez
+#   docplex config --upgrade "C:/Program Files/IBM/ILOG/CPLEX_Studio222"
+# para pasar de Community (1.000 vars) a la version academica completa
+cplex==22.*
 docplex
-cplex
 pandas
 matplotlib

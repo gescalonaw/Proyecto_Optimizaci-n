@@ -21,6 +21,7 @@ def probar_gurobi():
     m = gp.Model("prueba")
     m.Params.OutputFlag = 0
     m.Params.TimeLimit = 30
+    m.Params.MIPGap = 0
     x = m.addVars(N, vtype=GRB.BINARY)
     m.addConstr(gp.quicksum(p[i] * x[i] for i in range(N)) <= C)
     m.setObjective(gp.quicksum(v[i] * x[i] for i in range(N)), GRB.MAXIMIZE)
@@ -32,6 +33,7 @@ def probar_cplex():
     from docplex.mp.model import Model
     m = Model("prueba")
     m.set_time_limit(30)
+    m.parameters.mip.tolerances.mipgap = 0
     x = m.binary_var_list(N)
     m.add_constraint(m.sum(p[i] * x[i] for i in range(N)) <= C)
     m.maximize(m.sum(v[i] * x[i] for i in range(N)))
@@ -48,4 +50,4 @@ for nombre, f in (("Gurobi", probar_gurobi), ("CPLEX", probar_cplex)):
         print(f"[OK]    {nombre}: {f()}  ({time.time()-t:.1f} s)")
     except Exception as e:
         print(f"[FALLA] {nombre}: {type(e).__name__}: {e}")
-print("\nSi ambos dicen OK con el mismo obj, la iteracion 0 de licencias esta lista.")
+print("\nSi ambos dicen OK con el mismo obj y gap=0, la iteracion 0 de licencias esta lista.")
