@@ -1,24 +1,34 @@
-"""Iteracion 1: modelo PLE con RESTRICCIONES DURAS de CB-CTT (ITC-2007 track 3) en Gurobi.
+"""Modelo PLE de CB-CTT (ITC-2007 track 3) en Gurobi: restricciones duras + blandas.
 
-Variable:  x[c,r,t] = 1 si una clase del curso c se dicta en la sala r en el slot t
-           (slot t = dia * periodos_por_dia + periodo).
+VARIABLES
+  x[c,r,t] binaria  1 si una clase del curso c se dicta en la sala r en el slot t
+  y[c,d]   binaria  1 si el curso c tiene clase el dia d
+  w[c]     >= 0     dias que le faltan al curso c para llegar a su minimo
+  v[c,r]   binaria  1 si el curso c usa la sala r alguna vez
+  e[g,t]   >= 0     1 si el curriculo g tiene una clase aislada en el slot t
 
-Restricciones duras:
-  (1) Clases:          sum_{r,t} x[c,r,t] = l_c                     para todo curso c
-  (2) Ocupacion sala:  sum_c x[c,r,t] <= 1                          para toda sala r, slot t
-  (3) Conflictos:      a lo mas una clase por slot de
-                       (3a) un mismo curso, (3b) un mismo curriculo, (3c) un mismo profesor
-  (4) Disponibilidad:  x[c,r,t] = 0 si el curso c no puede dictarse en t
-                       (se implementa no creando esas variables)
+DURAS
+  (1) sum_{r,t} x[c,r,t] = l_c                         todo curso c
+  (2) sum_c x[c,r,t] <= 1                              toda sala r, slot t
+  (3) sum_{c in G} sum_r x[c,r,t] <= 1                 todo slot t y todo G =
+                                                       un curso, un curriculo o un profesor
+  (4) x[c,r,t] no existe si c no puede dictarse en t   (disponibilidad)
 
-Objetivo: 0 (solo factibilidad). Las restricciones blandas van en la iteracion 2.
+BLANDAS (pesos ITC-2007)
+  (5) y[c,d] <= sum_{r, t en d} x[c,r,t]               dias usados
+  (6) w[c] >= mnd_c - sum_d y[c,d]                     dias minimos
+  (7) e[q,t] >= z[q,t] - sum_{s vecino de t} z[q,s],   compacidad, con
+      z[q,t] = sum_{c in q} sum_r x[c,r,t]             (z es 0/1 por la restriccion 3)
+  (8) x[c,r,t] <= v[c,r]                               estabilidad de sala
+
+  min  1 * sum exceso[c,r] * x[c,r,t]                  capacidad
+     + 5 * sum w[c]
+     + 2 * sum e[q,t]
+     + 1 * sum_c (sum_r v[c,r] - 1)
 
 Uso (desde la raiz del repo):
-    python src/modelo_gurobi.py instancias/itc2007/toytoy.ctt
     python src/modelo_gurobi.py instancias/itc2007/comp01.ctt --tiempo 60 --hilos 4
-
-Escribe la solucion en formato ITC ("curso sala dia periodo" por linea) en
-resultados/soluciones/<instancia>_gurobi.sol, para revisarla con src/verificar.py.
+    python src/modelo_gurobi.py instancias/itc2007/comp01.ctt --solo-duras     (iteracion 1)
 """
 import argparse
 import time
@@ -27,86 +37,81 @@ from pathlib import Path
 import gurobipy as gp
 from gurobipy import GRB
 
+from comun import (PESO_CAPACIDAD, PESO_COMPACIDAD, PESO_DIAS, PESO_ESTABILIDAD,
+                   guardar_solucion, preparar, ruta_log)
 from leer_ctt import leer_ctt
 
-RAIZ = Path(__file__).resolve().parent.parent
 
-
-def construir_modelo(inst, nombre="cbctt"):
-    C = list(inst["cursos"])
-    R = list(inst["salas"])
-    T = inst["slots"]
-    P = inst["Periods_per_day"]
-
-    # (4) disponibilidad: solo se crean las variables (c, r, t) permitidas
-    def disponible(c, t):
-        return (c, t // P, t % P) not in inst["indisponibles"]
-
-    indices = [(c, r, t) for c in C for t in T if disponible(c, t) for r in R]
-
+def construir_modelo(inst, nombre="cbctt", solo_duras=False):
+    S = preparar(inst)
+    C, R, D, T = S["C"], S["R"], S["D"], S["T"]
     m = gp.Model(nombre)
-    x = m.addVars(indices, vtype=GRB.BINARY, name="x")
 
-    # (1) cada curso dicta exactamente sus l_c clases
-    m.addConstrs((x.sum(c, "*", "*") == inst["cursos"][c]["clases"] for c in C),
-                 name="clases")
+    x = m.addVars(S["X"], vtype=GRB.BINARY, name="x")
 
-    # (2) a lo mas una clase por sala y slot
-    m.addConstrs((x.sum("*", r, t) <= 1 for r in R for t in T), name="sala")
-
-    # (3a) un curso no dicta dos clases en el mismo slot
-    m.addConstrs((x.sum(c, "*", t) <= 1 for c in C for t in T), name="curso_slot")
-
-    # (3b) cursos de un mismo curriculo no se topan
-    for q, cursos_q in inst["curriculos"].items():
+    # ---------------- duras ----------------
+    m.addConstrs((x.sum(c, "*", "*") == inst["cursos"][c]["clases"] for c in C), name="clases")
+    # (solo para pares (r,t) / (c,t) que tienen variables, igual que en modelo_cplex.py)
+    pares_rt = sorted({(r, t) for (_, r, t) in S["X"]})
+    pares_ct = sorted({(c, t) for (c, _, t) in S["X"]})
+    m.addConstrs((x.sum("*", r, t) <= 1 for (r, t) in pares_rt), name="sala")
+    m.addConstrs((x.sum(c, "*", t) <= 1 for (c, t) in pares_ct), name="curso_slot")
+    for g, cursos_g in S["grupos"].items():
         for t in T:
-            m.addConstr(gp.quicksum(x.sum(c, "*", t) for c in cursos_q) <= 1,
-                        name=f"curriculo[{q},{t}]")
+            m.addConstr(gp.quicksum(x.sum(c, "*", t) for c in cursos_g) <= 1, name=f"conflicto[{g},{t}]")
 
-    # (3c) cursos de un mismo profesor no se topan
-    por_profesor = {}
-    for c, datos in inst["cursos"].items():
-        por_profesor.setdefault(datos["profesor"], []).append(c)
-    for prof, cursos_p in por_profesor.items():
-        if len(cursos_p) < 2:
-            continue  # con un solo curso ya lo cubre (3a)
-        for t in T:
-            m.addConstr(gp.quicksum(x.sum(c, "*", t) for c in cursos_p) <= 1,
-                        name=f"profesor[{prof},{t}]")
+    if solo_duras:
+        m.setObjective(0, GRB.MINIMIZE)
+        m.update()
+        return m, x
 
-    m.setObjective(0, GRB.MINIMIZE)  # iteracion 1: solo factibilidad
+    # ---------------- blandas ----------------
+    # capacidad
+    f_capacidad = gp.quicksum(S["exceso"][c, r] * x[c, r, t] for (c, r, t) in S["X"] if S["exceso"][c, r] > 0)
+
+    # dias minimos
+    y = m.addVars(C, D, vtype=GRB.BINARY, name="y")
+    w = m.addVars(C, lb=0, name="w")
+    m.addConstrs((y[c, d] <= gp.quicksum(x.sum(c, "*", t) for t in S["slots_dia"][d]) for c in C for d in D),
+                 name="dia_usado")
+    m.addConstrs((w[c] >= inst["cursos"][c]["min_dias"] - y.sum(c, "*") for c in C), name="dias_min")
+
+    # compacidad (solo curriculos)
+    curriculos = inst["curriculos"]
+    z = {(q, t): gp.quicksum(x.sum(c, "*", t) for c in cs) for q, cs in curriculos.items() for t in T}
+    e = m.addVars(list(curriculos), T, lb=0, name="e")
+    m.addConstrs((e[q, t] >= z[q, t] - gp.quicksum(z[q, s] for s in S["vecinos"][t])
+                  for q in curriculos for t in T), name="aislada")
+
+    # estabilidad de sala
+    v = m.addVars(C, R, vtype=GRB.BINARY, name="v")
+    m.addConstrs((x[c, r, t] <= v[c, r] for (c, r, t) in S["X"]), name="usa_sala")
+
+    m.setObjective(PESO_CAPACIDAD * f_capacidad
+                   + PESO_DIAS * w.sum()
+                   + PESO_COMPACIDAD * e.sum()
+                   + PESO_ESTABILIDAD * (v.sum() - len(C)),
+                   GRB.MINIMIZE)
     m.update()
     return m, x
 
 
-def extraer_solucion(inst, x):
-    P = inst["Periods_per_day"]
-    return [(c, r, t // P, t % P) for (c, r, t), var in x.items() if var.X > 0.5]
-
-
-def guardar_solucion(asignaciones, ruta):
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    with open(ruta, "w", encoding="utf-8") as f:
-        for c, r, d, p in sorted(asignaciones):
-            f.write(f"{c} {r} {d} {p}\n")
-
-
 def main():
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(description="CB-CTT en Gurobi")
     ap.add_argument("instancia", help="ruta al archivo .ctt")
     ap.add_argument("--tiempo", type=float, default=60, help="limite de tiempo en segundos")
     ap.add_argument("--hilos", type=int, default=4, help="Threads (usar el mismo en CPLEX)")
-    ap.add_argument("--gap", type=float, default=0.0, help="MIPGap (0 = demostrar optimo)")
+    ap.add_argument("--gap", type=float, default=0.0, help="MIPGap relativo (0 = demostrar optimo)")
+    ap.add_argument("--solo-duras", action="store_true", help="sin restricciones blandas (iteracion 1)")
     args = ap.parse_args()
 
     inst = leer_ctt(args.instancia)
     nombre = Path(args.instancia).stem
-    m, x = construir_modelo(inst, nombre)
+    m, x = construir_modelo(inst, nombre, args.solo_duras)
     m.Params.TimeLimit = args.tiempo
     m.Params.Threads = args.hilos
     m.Params.MIPGap = args.gap
-    (RAIZ / "resultados" / "logs").mkdir(parents=True, exist_ok=True)
-    m.Params.LogFile = str(RAIZ / "resultados" / "logs" / f"{nombre}_gurobi.log")
+    m.Params.LogFile = str(ruta_log(nombre, "gurobi"))
 
     print(f"{nombre}: {m.NumVars} variables, {m.NumConstrs} restricciones")
     t0 = time.time()
@@ -114,15 +119,15 @@ def main():
     seg = time.time() - t0
 
     if m.SolCount == 0:
-        estado = {GRB.INFEASIBLE: "INFACTIBLE", GRB.TIME_LIMIT: "SIN SOLUCION EN EL LIMITE"}
-        print(f"\n{nombre}: {estado.get(m.Status, m.Status)} ({seg:.1f} s)")
+        print(f"\n{nombre} [gurobi]: sin solucion (status {m.Status}) en {seg:.1f} s")
         return
 
-    sol = extraer_solucion(inst, x)
-    ruta = RAIZ / "resultados" / "soluciones" / f"{nombre}_gurobi.sol"
-    guardar_solucion(sol, ruta)
-    print(f"\n{nombre}: solucion factible con {len(sol)} clases en {seg:.1f} s -> {ruta.relative_to(RAIZ)}")
-    print(f"Revisala con:  python src/verificar.py {args.instancia} {ruta.relative_to(RAIZ).as_posix()}")
+    P = inst["Periods_per_day"]
+    sol = [(c, r, t // P, t % P) for (c, r, t), var in x.items() if var.X > 0.5]
+    ruta = guardar_solucion(sol, nombre, "gurobi")
+    print(f"\n{nombre} [gurobi]  estado={m.Status}  objetivo={m.ObjVal:.0f}  cota={m.ObjBound:.2f}  "
+          f"gap={100 * m.MIPGap:.2f}%  tiempo={seg:.1f}s")
+    print(f"Revisala con:  python src/verificar.py {args.instancia} {ruta.relative_to(ruta.parents[2]).as_posix()}")
 
 
 if __name__ == "__main__":
