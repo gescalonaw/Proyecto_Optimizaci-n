@@ -13,6 +13,8 @@ Proyecto de Optimización (UdeC, 2026-2). Se modela el problema de horarios por 
     src/modelo_cplex.py     el mismo modelo en CPLEX (docplex)
     src/verificar.py        revisa una solución sin usar el solver: violaciones duras y costo blando
     src/prueba_licencias.py prueba que ambos solvers tengan licencia completa
+    src/correr.py           corre ambos solvers sobre varias instancias y anota en resultados/tabla.csv
+    src/comparar.py         muestra la tabla como Gurobi vs CPLEX por instancia
     resultados/             soluciones (.sol) y logs; no se suben al repo
     chome/                  guía del servidor y script para ver su hardware
     informe/                plan del proyecto y material para la presentación
@@ -25,6 +27,14 @@ Proyecto de Optimización (UdeC, 2026-2). Se modela el problema de horarios por 
 
 - `--tiempo` límite en segundos, `--hilos` threads (usar el MISMO en ambos solvers), `--gap` MIPGap relativo (0 por defecto), `--solo-duras` sin restricciones blandas.
 - El objetivo que imprime cada solver debe ser igual al TOTAL del costo blando del verificador.
+
+Corridas por lote (en Chome, dentro de tmux):
+
+    python src/correr.py comp01 comp11 --tiempo 60 --hilos 8           # piloto
+    python src/correr.py --lista instancias/oficiales.txt --tiempo 3600 --hilos 8
+    python src/comparar.py --tiempo 3600 --hilos 8
+
+`correr.py` agrega una fila por corrida a `resultados/tabla.csv` apenas termina (estado, tiempo, objetivo, cota, gap, nodos, verificación, carga del servidor). Si se corta, se relanza el mismo comando y salta lo ya corrido.
 
 ## Puesta en marcha en un PC (cada integrante)
 
@@ -43,6 +53,6 @@ Para el servidor, ver [chome/GUIA_CHOME.md](chome/GUIA_CHOME.md).
 - [x] Iteración 0: repo, instancias, licencias académicas en PC y en Chome
 - [x] Iteración 1: modelo con restricciones duras + verificador
 - [x] Iteración 2: restricciones blandas + modelo CPLEX
-- [ ] Iteración 3: `correr.py` (tabla de resultados) y piloto
+- [x] Iteración 3: `correr.py` y `comparar.py` (piloto pendiente en Chome)
 - [ ] Iteración 4: selección de instancias + corridas de 1 h en Chome
 - [ ] Iteración 5: análisis, supuestos y presentación
