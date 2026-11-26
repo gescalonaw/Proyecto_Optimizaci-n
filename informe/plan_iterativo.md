@@ -6,6 +6,18 @@ Presentación final: 15 min. La fecha cae el 20 nov, el 25 nov o el 2 dic (**por
 
 Estado al 17/11: la carpeta pROYECTO_OPTIMIZACIÓN solo tiene la rúbrica y el enunciado. Todavía no hay código ni instancias.
 
+## Estado (26 nov)
+
+- [x] Iteración 0: repo, instancias, licencias académicas en el PC y en Chome (Gurobi 13 y CPLEX 22.2)
+- [x] Iteración 1: modelo con restricciones duras + verificador (PR #1)
+- [x] Iteración 2: restricciones blandas + modelo CPLEX (PR #2)
+- [ ] Iteración 3: `correr.py` y piloto
+- [ ] Iteración 4: selección de instancias + corridas de 1 h en Chome
+- [ ] Iteración 5: análisis, supuestos y presentación
+- [ ] Confirmar la fecha de la presentación final
+
+El servidor cambió: el proyecto se corre en **Chome**, no en Luthier (aviso de Mauricio Echavarría).
+
 ## La idea del plan iterativo
 
 Cada iteración termina con algo que **funciona y se puede mostrar**, aunque sea pequeño. Nunca se avanza a la siguiente con la anterior rota. Si se acaba el tiempo, igual queda algo que presentar.
@@ -18,7 +30,7 @@ Comparación computacional 30 % · Modelo matemático 25 % · Instancias 20 % ·
 
 - Confirmar la fecha de la presentación final y los roles.
 - Crear una carpeta compartida (Drive o GitHub) con esta estructura: `instancias/`, `src/`, `resultados/`, `informe/`.
-- Licencias: Gurobi Academic WLS en gurobi.com (el PC de Gabriela tiene la limitada de 2.000 variables, que no alcanza) y CPLEX, que ya funciona. Pedir acceso a Luthier a Mauricio Echavarría (mechavarria@udec.cl), porque las corridas de 1 h se hacen ahí.
+- Licencias académicas de Gurobi y CPLEX en el PC de desarrollo y en el servidor **Chome** (chome.inf.udec.cl), donde se hacen las corridas de 1 h. Contacto del servidor: Mauricio Echavarría (mechavarria@udec.cl).
 - Descargar los .ctt de github.com/Docheinstein/itc2007-cct (carpeta `datasets/`).
 - Anotar el feedback de la profesora sobre la presentación inicial (vale 5 %).
 
@@ -58,14 +70,14 @@ Comparación computacional 30 % · Modelo matemático 25 % · Instancias 20 % ·
   - densidad de conflictos (n.º de currículos o indisponibilidades).
 - Sirven las comp01–comp21 y además sub-instancias recortadas (quitando cursos), si faltan casos pequeños.
 - Hacer una tabla de las instancias con sus características (va al informe y a las diapositivas).
-- Correr en Luthier con 1 h por instancia y por solver. **Calcular el tiempo antes:** 9 instancias × 2 solvers × 1 h = 18 h. Hay que dejarlas corriendo de noche o en paralelo, y partir apenas termine la iteración 3.
+- Correr en Chome con 1 h por instancia y por solver. **Calcular el tiempo antes:** 9 instancias × 2 solvers × 1 h = 18 h. Hay que dejarlas corriendo de noche o en paralelo, y partir apenas termine la iteración 3.
 
 **Listo cuando:** `tabla.csv` está completa con las dos corridas de cada instancia.
 
 ## Iteración 5: análisis y presentación (dom 29 nov – mar 1 dic)
 
 - Gráficos: tiempo por instancia, gap final y objetivo de Gurobi vs CPLEX. Discutir dónde gana cada uno y por qué (si no cierra en 1 h, se comparan cota y gap, no solo tiempo).
-- Supuestos y limitaciones: periodos de igual duración, sin preferencias de profesor, modelo monolítico (no la descomposición de Lach y Lübbecke), límite de 1 h, hardware de Luthier.
+- Supuestos y limitaciones: periodos de igual duración, sin preferencias de profesor, modelo monolítico (no la descomposición de Lach y Lübbecke), límite de 1 h, hardware de Chome (Xeon Gold 5320T, servidor compartido).
 - Diapositivas de 15 min hechas por el grupo (no se permite una presentación generada por IA) y 2 ensayos cronometrados con banco de preguntas.
 
 **Listo cuando:** ensayo completo en ≤ 15 min.
@@ -77,7 +89,7 @@ Comparación computacional 30 % · Modelo matemático 25 % · Instancias 20 % ·
 | Modelador/a principal | Formulación escrita (ecuaciones y explicación), coherencia modelo–código |
 | Modeladora secundaria (Gabriela) | Revisar la formulación, supuestos y limitaciones, coordinación y plan |
 | Programación Gurobi | lector .ctt, modelo Gurobi, verificador |
-| Programación CPLEX | modelo docplex, `correr.py`, corridas en Luthier |
+| Programación CPLEX | modelo docplex, `correr.py`, corridas en Chome |
 | Instancias y análisis | selección y tabla de instancias, gráficos, discusión de resultados |
 
 ## Si la presentación es el 20 nov (versión mínima)
