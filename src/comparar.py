@@ -4,7 +4,10 @@ Toma la ultima corrida sin error de cada (modelo, instancia, solver, limite, hil
 tabla y la guarda en resultados/comparacion.csv.
 
 "costo" es el costo REAL del horario (calculado por verificar.py) y "gap" se calcula con ese costo:
-    gap % = 100 * (costo - cota) / costo
+    gap % = 100 * (costo - max(cota, 0)) / costo
+La cota se recorta en 0: ningun horario cuesta menos de 0, asi que una cota negativa del solver
+no aporta informacion (pasa por el termino "salas usadas - 1" en la relajacion). En ese caso el
+gap queda en 100 % y la tabla lo marca con "*".
 Con el modelo v2 coinciden con lo que reporta el solver; con v1 el solver puede sobreestimar el
 objetivo, por eso se usa el costo verificado para comparar. Si el costo es 0, el gap % no tiene
 sentido y se muestra el gap absoluto (costo - cota).
@@ -24,14 +27,16 @@ SOLVERS = ("gurobi", "cplex")
 
 
 def gap_real(r):
-    """(gap %, gap absoluto) usando el costo verificado y la cota del solver."""
+    """(gap %, gap absoluto, cota usada) con el costo verificado y la cota recortada en 0."""
     try:
         costo, cota = float(r["costo_verif"]), float(r["cota"])
     except (KeyError, ValueError):
-        return "", ""
-    absoluto = costo - cota
+        return "", "", ""
+    cota_util = max(cota, 0.0)
+    absoluto = costo - cota_util
     pct = 100 * absoluto / costo if costo > 0 else None
-    return ("" if pct is None else f"{pct:.2f}"), f"{absoluto:.2f}"
+    marca = "*" if cota < 0 else ""
+    return ("" if pct is None else f"{pct:.2f}{marca}"), f"{absoluto:.2f}{marca}", f"{cota_util:.2f}"
 
 
 def main():
@@ -56,9 +61,9 @@ def main():
         verif = []
         for s in SOLVERS:
             r = ultimas.get((mod, inst, s, lim, hil), {})
-            pct, ab = gap_real(r) if r else ("", "")
+            pct, ab, cota_util = gap_real(r) if r else ("", "", "")
             fila.update({f"{s}_estado": r.get("estado", "-"), f"{s}_objetivo_solver": r.get("objetivo", "-"),
-                         f"{s}_costo": r.get("costo_verif", "-"), f"{s}_cota": r.get("cota", "-"),
+                         f"{s}_costo": r.get("costo_verif", "-"), f"{s}_cota_solver": r.get("cota", "-"), f"{s}_cota_usada": cota_util or "-",
                          f"{s}_gap_pct": pct, f"{s}_gap_abs": ab, f"{s}_tiempo_s": r.get("tiempo_s", "-")})
             if r:
                 verif.append(r.get("verif_ok", ""))
@@ -75,7 +80,8 @@ def main():
             return fila[f"{s}_gap_pct"]
         return f"abs {fila[f'{s}_gap_abs']}" if fila[f"{s}_gap_abs"] else "-"
 
-    print("costo = costo real verificado; gap% = (costo - cota) / costo; si el costo es 0 se muestra el gap absoluto\n")
+    print("costo = costo real verificado; gap% = (costo - max(cota, 0)) / costo; si el costo es 0 se muestra el gap absoluto")
+    print("* = la cota del solver era negativa (sin informacion util), se uso 0\n")
     print(f"{'instancia':<10}{'modelo':<11}{'lim':>5}{'hil':>4} | {'GUROBI estado':<14}{'costo':>7}{'gap%':>11}{'t(s)':>9} | "
           f"{'CPLEX estado':<14}{'costo':>7}{'gap%':>11}{'t(s)':>9} | verif")
     for r in filas:
