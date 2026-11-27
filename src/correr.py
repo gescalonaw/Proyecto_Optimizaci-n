@@ -105,7 +105,8 @@ def correr_uno(ruta, solver, tiempo, hilos, gap, version="v2"):
             import modelo_gurobi as mod
         else:
             import modelo_cplex as mod
-        r = mod.resolver(inst, nombre, tiempo, hilos, gap, mostrar=False, exacto=version == "v2")
+        # el nombre lleva la version para que v1 y v2 no se pisen los .log y .sol si corren a la vez
+        r = mod.resolver(inst, f"{nombre}_{version}", tiempo, hilos, gap, mostrar=False, exacto=version == "v2")
         fila.update({k: fmt(r[k]) for k in ("version", "estado", "tiempo_s", "cota", "tiempo_modelo_s")})
         fila.update({"objetivo": fmt(r["objetivo"], 0) if r["objetivo"] is not None else "",
                      "gap_pct": fmt(100 * r["gap"]) if r["gap"] is not None else "",
@@ -113,7 +114,7 @@ def correr_uno(ruta, solver, tiempo, hilos, gap, version="v2"):
                      if r["objetivo"] is not None and r["cota"] is not None else "",
                      "nodos": r["nodos"], "variables": r["variables"], "restricciones": r["restricciones"]})
         if r["solucion"]:
-            guardar_solucion(r["solucion"], nombre, solver)
+            guardar_solucion(r["solucion"], f"{nombre}_{version}", solver)
             duras, blandas, _ = verificar(inst, r["solucion"])
             d, b = sum(duras.values()), sum(blandas.values())
             obj = round(r["objetivo"])

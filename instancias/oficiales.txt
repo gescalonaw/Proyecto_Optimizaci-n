@@ -1,0 +1,13 @@
+# Instancias oficiales (iteracion 4). Una por linea; lo que va despues de # se ignora.
+# Cada caracteristica tiene al menos 3 instancias (ver instancias/resumen.csv).
+#
+#            cursos  vars x  ocup%  confl  indisp%   grupo
+comp01     #   30     5.082   88.9    3.3     5.9    pequena | ocupacion alta | conflictos bajos
+comp11     #   30     6.280   72.0    3.8     7.0    pequena | conflictos bajos
+comp18     #   47     9.882   42.6    5.6    35.1    pequena | ocupacion baja | conflictos altos
+comp05     #   54    10.557   46.9   11.2    39.7    mediana | ocupacion baja | conflictos altos
+comp12     #   88    19.800   55.1   12.4    43.2    mediana | ocupacion baja | conflictos altos
+comp04     #   79    28.422   63.6    3.9    20.1    mediana | conflictos bajos
+comp10     #  115    39.258   82.2    6.1    24.1    grande  | ocupacion alta
+comp20     #  121    44.346   82.1    5.9    22.8    grande  | ocupacion alta
+comp07     #  131    52.160   86.8    5.8    20.4    grande  | ocupacion alta
