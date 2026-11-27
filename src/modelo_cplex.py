@@ -56,10 +56,17 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
 
     y = m.binary_var_dict([(c, d) for c in C for d in D], name="y")
     w = m.continuous_var_dict(C, lb=0, name="w")
+    u = m.binary_var_dict(C, name="u")
     for c in C:
         for d in D:
             m.add_constraint(y[c, d] <= m.sum(suma_cs(c, t) for t in S["slots_dia"][d]))
-        m.add_constraint(w[c] >= inst["cursos"][c]["min_dias"] - m.sum(y[c, d] for d in D))
+            for t in S["slots_dia"][d]:
+                m.add_constraint(y[c, d] >= suma_cs(c, t))
+        mnd = inst["cursos"][c]["min_dias"]
+        n_c = m.sum(y[c, d] for d in D)
+        m.add_constraint(w[c] >= mnd - n_c)
+        m.add_constraint(w[c] <= mnd * u[c])
+        m.add_constraint(w[c] <= mnd - n_c + mnd * (1 - u[c]))
 
     curriculos = inst["curriculos"]
     z = {(q, t): m.sum(suma_cs(c, t) for c in cs) for q, cs in curriculos.items() for t in T}
@@ -67,10 +74,18 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     for q in curriculos:
         for t in T:
             m.add_constraint(e[q, t] >= z[q, t] - m.sum(z[q, s] for s in S["vecinos"][t]))
+            m.add_constraint(e[q, t] <= z[q, t])
+            for s_ in S["vecinos"][t]:
+                m.add_constraint(e[q, t] <= 1 - z[q, s_])
 
     v = m.binary_var_dict([(c, r) for c in C for r in R], name="v")
+    por_curso_sala = {}
     for (c, r, t), var in x.items():
         m.add_constraint(var <= v[c, r])
+        por_curso_sala.setdefault((c, r), []).append(var)
+    for c in C:
+        for r in R:
+            m.add_constraint(v[c, r] <= m.sum(por_curso_sala.get((c, r), [])))
 
     m.minimize(PESO_CAPACIDAD * f_capacidad
                + PESO_DIAS * m.sum(w.values())

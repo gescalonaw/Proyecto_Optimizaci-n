@@ -4,6 +4,7 @@ VARIABLES
   x[c,r,t] binaria  1 si una clase del curso c se dicta en la sala r en el slot t
   y[c,d]   binaria  1 si el curso c tiene clase el dia d
   w[c]     >= 0     dias que le faltan al curso c para llegar a su minimo
+  u[c]     binaria  1 si al curso c le faltan dias (w > 0)
   v[c,r]   binaria  1 si el curso c usa la sala r alguna vez
   e[g,t]   >= 0     1 si el curriculo g tiene una clase aislada en el slot t
 
@@ -15,11 +16,18 @@ DURAS
   (4) x[c,r,t] no existe si c no puede dictarse en t   (disponibilidad)
 
 BLANDAS (pesos ITC-2007)
-  (5) y[c,d] <= sum_{r, t en d} x[c,r,t]               dias usados
-  (6) w[c] >= mnd_c - sum_d y[c,d]                     dias minimos
-  (7) e[q,t] >= z[q,t] - sum_{s vecino de t} z[q,s],   compacidad, con
-      z[q,t] = sum_{c in q} sum_r x[c,r,t]             (z es 0/1 por la restriccion 3)
-  (8) x[c,r,t] <= v[c,r]                               estabilidad de sala
+  (5) y[c,d] <= sum_{r, t en d} x[c,r,t]               dias usados: y = 1 exactamente
+      y[c,d] >= sum_r x[c,r,t]   para todo t en d      cuando c tiene clase el dia d
+  (6) w[c] >= mnd_c - n_c,   w[c] <= mnd_c * u[c],     dias minimos, con n_c = sum_d y[c,d]:
+      w[c] <= mnd_c - n_c + mnd_c * (1 - u[c])         w = max(0, mnd_c - n_c) exactamente
+  (7) e[q,t] >= z[q,t] - sum_{s vecino de t} z[q,s]    compacidad, con
+      e[q,t] <= z[q,t],  e[q,t] <= 1 - z[q,s]          z[q,t] = sum_{c in q} sum_r x[c,r,t] (0/1 por (3));
+                                                       e = 1 exactamente si la clase esta aislada
+  (8) x[c,r,t] <= v[c,r] <= sum_t x[c,r,t]             estabilidad de sala: v = 1 exactamente si c usa r
+
+  Las cotas superiores de (5)-(8) no cambian el optimo, pero hacen que el objetivo de CUALQUIER
+  solucion entera (no solo la optima) sea igual a su costo real. Sin ellas, una solucion
+  incumbente podia reportar penalizaciones que no existian (comp05 con CPLEX: 196.211 vs 8.150 real).
 
   min  1 * sum exceso[c,r] * x[c,r,t]                  capacidad
      + 5 * sum w[c]
@@ -72,9 +80,17 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     # dias minimos
     y = m.addVars(C, D, vtype=GRB.BINARY, name="y")
     w = m.addVars(C, lb=0, name="w")
+    u = m.addVars(C, vtype=GRB.BINARY, name="u")
     m.addConstrs((y[c, d] <= gp.quicksum(x.sum(c, "*", t) for t in S["slots_dia"][d]) for c in C for d in D),
                  name="dia_usado")
-    m.addConstrs((w[c] >= inst["cursos"][c]["min_dias"] - y.sum(c, "*") for c in C), name="dias_min")
+    m.addConstrs((y[c, d] >= x.sum(c, "*", t) for c in C for d in D for t in S["slots_dia"][d]),
+                 name="dia_usado_inf")
+    for c in C:
+        mnd = inst["cursos"][c]["min_dias"]
+        n_c = y.sum(c, "*")
+        m.addConstr(w[c] >= mnd - n_c, name=f"dias_min[{c}]")
+        m.addConstr(w[c] <= mnd * u[c], name=f"dias_min_u[{c}]")
+        m.addConstr(w[c] <= mnd - n_c + mnd * (1 - u[c]), name=f"dias_min_sup[{c}]")
 
     # compacidad (solo curriculos)
     curriculos = inst["curriculos"]
@@ -82,10 +98,14 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     e = m.addVars(list(curriculos), T, lb=0, name="e")
     m.addConstrs((e[q, t] >= z[q, t] - gp.quicksum(z[q, s] for s in S["vecinos"][t])
                   for q in curriculos for t in T), name="aislada")
+    m.addConstrs((e[q, t] <= z[q, t] for q in curriculos for t in T), name="aislada_sup")
+    m.addConstrs((e[q, t] <= 1 - z[q, s] for q in curriculos for t in T for s in S["vecinos"][t]),
+                 name="aislada_vecino")
 
     # estabilidad de sala
     v = m.addVars(C, R, vtype=GRB.BINARY, name="v")
     m.addConstrs((x[c, r, t] <= v[c, r] for (c, r, t) in S["X"]), name="usa_sala")
+    m.addConstrs((v[c, r] <= x.sum(c, r, "*") for c in C for r in R), name="usa_sala_sup")
 
     m.setObjective(PESO_CAPACIDAD * f_capacidad
                    + PESO_DIAS * w.sum()

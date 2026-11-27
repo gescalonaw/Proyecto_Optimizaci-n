@@ -25,13 +25,13 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from comun import RAIZ, guardar_solucion
+from comun import RAIZ, VERSION_MODELO, guardar_solucion
 from leer_ctt import leer_ctt
 from verificar import verificar
 
 TABLA = RAIZ / "resultados" / "tabla.csv"
-COLUMNAS = ["fecha", "instancia", "solver", "version", "hilos", "limite_s", "estado",
-            "tiempo_s", "objetivo", "cota", "gap_pct", "nodos", "variables", "restricciones",
+COLUMNAS = ["fecha", "modelo", "instancia", "solver", "version", "hilos", "limite_s", "estado",
+            "tiempo_s", "objetivo", "cota", "gap_pct", "gap_abs", "nodos", "variables", "restricciones",
             "duras_verif", "costo_verif", "verif_ok", "tiempo_modelo_s", "carga_1min", "maquina",
             "error"]
 
@@ -52,9 +52,27 @@ def ya_corridas():
     """Combinaciones ya terminadas (sin error) en la tabla."""
     if not TABLA.exists():
         return set()
+    archivar_si_cambio()
+    if not TABLA.exists():
+        return set()
     with open(TABLA, newline="", encoding="utf-8") as f:
         return {(r["instancia"], r["solver"], r["limite_s"], r["hilos"])
                 for r in csv.DictReader(f) if r["estado"] != "ERROR"}
+
+
+def archivar_si_cambio():
+    """Si la tabla existente tiene otras columnas o es de otra version del modelo, se renombra
+    a tabla_anterior_<fecha>.csv (sus resultados no son comparables con los nuevos)."""
+    if not TABLA.exists():
+        return
+    with open(TABLA, newline="", encoding="utf-8") as f:
+        lector = csv.DictReader(f)
+        filas = list(lector)
+        mismo = lector.fieldnames == COLUMNAS and all(r["modelo"] == VERSION_MODELO for r in filas)
+    if not mismo:
+        destino = TABLA.with_name(f"tabla_anterior_{datetime.now():%Y%m%d_%H%M%S}.csv")
+        TABLA.rename(destino)
+        print(f"Aviso: la tabla era de otra version del modelo; se movio a {destino.name}")
 
 
 def anotar(fila):
@@ -74,7 +92,7 @@ def fmt(v, dec=2):
 def correr_uno(ruta, solver, tiempo, hilos, gap):
     inst = leer_ctt(ruta)
     nombre = ruta.stem
-    fila = {"fecha": datetime.now().isoformat(timespec="seconds"), "instancia": nombre,
+    fila = {"fecha": datetime.now().isoformat(timespec="seconds"), "modelo": VERSION_MODELO, "instancia": nombre,
             "solver": solver, "hilos": hilos, "limite_s": fmt(float(tiempo), 0),
             "carga_1min": fmt(os.getloadavg()[0]) if hasattr(os, "getloadavg") else "",
             "maquina": f"{socket.gethostname()} ({platform.processor() or platform.machine()})"}
@@ -87,6 +105,8 @@ def correr_uno(ruta, solver, tiempo, hilos, gap):
         fila.update({k: fmt(r[k]) for k in ("version", "estado", "tiempo_s", "cota", "tiempo_modelo_s")})
         fila.update({"objetivo": fmt(r["objetivo"], 0) if r["objetivo"] is not None else "",
                      "gap_pct": fmt(100 * r["gap"]) if r["gap"] is not None else "",
+                     "gap_abs": fmt(r["objetivo"] - r["cota"])
+                     if r["objetivo"] is not None and r["cota"] is not None else "",
                      "nodos": r["nodos"], "variables": r["variables"], "restricciones": r["restricciones"]})
         if r["solucion"]:
             guardar_solucion(r["solucion"], nombre, solver)
@@ -131,7 +151,7 @@ def main():
               f"({args.tiempo:.0f} s, {args.hilos} hilos) - {datetime.now():%H:%M:%S}", flush=True)
         f = correr_uno(ruta, solver, args.tiempo, args.hilos, args.gap)
         print(f"   {f.get('estado')}  obj={f.get('objetivo', '')}  cota={f.get('cota', '')}  "
-              f"gap={f.get('gap_pct', '')}%  t={f.get('tiempo_s', '')}s  verificado={f.get('verif_ok', '')}",
+              f"gap={f.get('gap_pct', '')}% (abs {f.get('gap_abs', '')})  t={f.get('tiempo_s', '')}s  verificado={f.get('verif_ok', '')}",
               flush=True)
 
     print(f"\nListo. Resultados en {TABLA.relative_to(RAIZ)}")

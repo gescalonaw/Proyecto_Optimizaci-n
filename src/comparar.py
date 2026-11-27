@@ -39,9 +39,9 @@ def main():
         filas.append({
             "instancia": inst, "limite_s": lim, "hilos": hil,
             "gurobi_estado": g.get("estado", "-"), "gurobi_obj": g.get("objetivo", "-"),
-            "gurobi_gap_pct": g.get("gap_pct", "-"), "gurobi_tiempo_s": g.get("tiempo_s", "-"),
+            "gurobi_gap_pct": g.get("gap_pct", "-"), "gurobi_gap_abs": g.get("gap_abs", "-"), "gurobi_tiempo_s": g.get("tiempo_s", "-"),
             "cplex_estado": c.get("estado", "-"), "cplex_obj": c.get("objetivo", "-"),
-            "cplex_gap_pct": c.get("gap_pct", "-"), "cplex_tiempo_s": c.get("tiempo_s", "-"),
+            "cplex_gap_pct": c.get("gap_pct", "-"), "cplex_gap_abs": c.get("gap_abs", "-"), "cplex_tiempo_s": c.get("tiempo_s", "-"),
             "verificado": "SI" if g.get("verif_ok") != "NO" and c.get("verif_ok") != "NO" else "NO",
         })
 
@@ -50,12 +50,19 @@ def main():
         w.writeheader()
         w.writerows(filas)
 
-    print(f"{'instancia':<10} {'lim':>5} {'hil':>3} | {'GUROBI estado':<14}{'obj':>7}{'gap%':>8}{'t(s)':>9} | "
-          f"{'CPLEX estado':<14}{'obj':>7}{'gap%':>8}{'t(s)':>9} | verif")
+    def gap(r, s):
+        o, p, a = r[f"{s}_obj"], r[f"{s}_gap_pct"], r[f"{s}_gap_abs"]
+        if o in ("0", "-") or p in ("", "-"):
+            return f"abs {a}" if a not in ("", "-") else "-"
+        return p
+
+    print("gap% = gap relativo del solver; si el objetivo es 0 se muestra el gap absoluto (objetivo - cota)\n")
+    print(f"{'instancia':<10} {'lim':>5} {'hil':>3} | {'GUROBI estado':<14}{'obj':>7}{'gap%':>11}{'t(s)':>9} | "
+          f"{'CPLEX estado':<14}{'obj':>7}{'gap%':>11}{'t(s)':>9} | verif")
     for r in filas:
         print(f"{r['instancia']:<10} {r['limite_s']:>5} {r['hilos']:>3} | "
-              f"{r['gurobi_estado']:<14}{r['gurobi_obj']:>7}{r['gurobi_gap_pct']:>8}{r['gurobi_tiempo_s']:>9} | "
-              f"{r['cplex_estado']:<14}{r['cplex_obj']:>7}{r['cplex_gap_pct']:>8}{r['cplex_tiempo_s']:>9} | "
+              f"{r['gurobi_estado']:<14}{r['gurobi_obj']:>7}{gap(r, 'gurobi'):>11}{r['gurobi_tiempo_s']:>9} | "
+              f"{r['cplex_estado']:<14}{r['cplex_obj']:>7}{gap(r, 'cplex'):>11}{r['cplex_tiempo_s']:>9} | "
               f"{r['verificado']}")
     print(f"\nGuardado en {SALIDA.relative_to(RAIZ)}")
 

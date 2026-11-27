@@ -6,6 +6,9 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 
+# se anota en cada fila de resultados/tabla.csv; cambiarla si cambia la formulacion
+VERSION_MODELO = "v2-exacto"
+
 # pesos de las restricciones blandas (ITC-2007, track 3)
 PESO_CAPACIDAD = 1      # por alumno que no cabe en la sala
 PESO_DIAS = 5           # por dia faltante bajo el minimo de dias de trabajo
