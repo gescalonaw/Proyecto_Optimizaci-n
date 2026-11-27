@@ -18,3 +18,7 @@ resultados/soluciones/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# resultados de corridas (viven en Chome)
+resultados/*.csv
+gurobi.log
