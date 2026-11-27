@@ -19,7 +19,7 @@ from comun import (PESO_CAPACIDAD, PESO_COMPACIDAD, PESO_DIAS, PESO_ESTABILIDAD,
 from leer_ctt import leer_ctt
 
 
-def construir_modelo(inst, nombre="cbctt", solo_duras=False):
+def construir_modelo(inst, nombre="cbctt", solo_duras=False, exacto=True):
     S = preparar(inst)
     C, R, D, T = S["C"], S["R"], S["D"], S["T"]
     m = Model(nombre)
@@ -56,17 +56,19 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
 
     y = m.binary_var_dict([(c, d) for c in C for d in D], name="y")
     w = m.continuous_var_dict(C, lb=0, name="w")
-    u = m.binary_var_dict(C, name="u")
+    u = m.binary_var_dict(C, name="u") if exacto else None
     for c in C:
         for d in D:
             m.add_constraint(y[c, d] <= m.sum(suma_cs(c, t) for t in S["slots_dia"][d]))
-            for t in S["slots_dia"][d]:
-                m.add_constraint(y[c, d] >= suma_cs(c, t))
+            if exacto:
+                for t in S["slots_dia"][d]:
+                    m.add_constraint(y[c, d] >= suma_cs(c, t))
         mnd = inst["cursos"][c]["min_dias"]
         n_c = m.sum(y[c, d] for d in D)
         m.add_constraint(w[c] >= mnd - n_c)
-        m.add_constraint(w[c] <= mnd * u[c])
-        m.add_constraint(w[c] <= mnd - n_c + mnd * (1 - u[c]))
+        if exacto:
+            m.add_constraint(w[c] <= mnd * u[c])
+            m.add_constraint(w[c] <= mnd - n_c + mnd * (1 - u[c]))
 
     curriculos = inst["curriculos"]
     z = {(q, t): m.sum(suma_cs(c, t) for c in cs) for q, cs in curriculos.items() for t in T}
@@ -74,18 +76,20 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     for q in curriculos:
         for t in T:
             m.add_constraint(e[q, t] >= z[q, t] - m.sum(z[q, s] for s in S["vecinos"][t]))
-            m.add_constraint(e[q, t] <= z[q, t])
-            for s_ in S["vecinos"][t]:
-                m.add_constraint(e[q, t] <= 1 - z[q, s_])
+            if exacto:
+                m.add_constraint(e[q, t] <= z[q, t])
+                for s_ in S["vecinos"][t]:
+                    m.add_constraint(e[q, t] <= 1 - z[q, s_])
 
     v = m.binary_var_dict([(c, r) for c in C for r in R], name="v")
     por_curso_sala = {}
     for (c, r, t), var in x.items():
         m.add_constraint(var <= v[c, r])
         por_curso_sala.setdefault((c, r), []).append(var)
-    for c in C:
-        for r in R:
-            m.add_constraint(v[c, r] <= m.sum(por_curso_sala.get((c, r), [])))
+    if exacto:
+        for c in C:
+            for r in R:
+                m.add_constraint(v[c, r] <= m.sum(por_curso_sala.get((c, r), [])))
 
     m.minimize(PESO_CAPACIDAD * f_capacidad
                + PESO_DIAS * m.sum(w.values())
@@ -99,10 +103,10 @@ ESTADOS = {101: "OPTIMO", 102: "OPTIMO", 107: "LIMITE_TIEMPO", 108: "SIN_SOLUCIO
            103: "INFACTIBLE", 119: "INFACTIBLE"}
 
 
-def resolver(inst, nombre, tiempo, hilos, gap=0.0, solo_duras=False, mostrar=True):
+def resolver(inst, nombre, tiempo, hilos, gap=0.0, solo_duras=False, mostrar=True, exacto=True):
     """Arma y resuelve el modelo. Devuelve un diccionario con los resultados (lo usa src/correr.py)."""
     t0 = time.time()
-    m, x = construir_modelo(inst, nombre, solo_duras)
+    m, x = construir_modelo(inst, nombre, solo_duras, exacto)
     t_modelo = time.time() - t0
     m.set_time_limit(tiempo)
     m.parameters.threads = hilos
@@ -148,11 +152,12 @@ def main():
     ap.add_argument("--hilos", type=int, default=4, help="threads (usar el mismo en Gurobi)")
     ap.add_argument("--gap", type=float, default=0.0, help="mipgap relativo (0 = demostrar optimo)")
     ap.add_argument("--solo-duras", action="store_true", help="sin restricciones blandas (iteracion 1)")
+    ap.add_argument("--version", choices=["v1", "v2"], default="v2", help="formulacion (ver comun.py)")
     args = ap.parse_args()
 
     inst = leer_ctt(args.instancia)
     nombre = Path(args.instancia).stem
-    r = resolver(inst, nombre, args.tiempo, args.hilos, args.gap, args.solo_duras)
+    r = resolver(inst, nombre, args.tiempo, args.hilos, args.gap, args.solo_duras, exacto=args.version == "v2")
     if not r["solucion"]:
         print(f"\n{nombre} [cplex]: {r['estado']} en {r['tiempo_s']:.1f} s")
         return

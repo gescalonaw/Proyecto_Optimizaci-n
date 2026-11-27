@@ -28,6 +28,7 @@ BLANDAS (pesos ITC-2007)
   Las cotas superiores de (5)-(8) no cambian el optimo, pero hacen que el objetivo de CUALQUIER
   solucion entera (no solo la optima) sea igual a su costo real. Sin ellas, una solucion
   incumbente podia reportar penalizaciones que no existian (comp05 con CPLEX: 196.211 vs 8.150 real).
+  Con --version v1 se omiten esas cotas superiores (formulacion base, para comparar).
 
   min  1 * sum exceso[c,r] * x[c,r,t]                  capacidad
      + 5 * sum w[c]
@@ -50,7 +51,7 @@ from comun import (PESO_CAPACIDAD, PESO_COMPACIDAD, PESO_DIAS, PESO_ESTABILIDAD,
 from leer_ctt import leer_ctt
 
 
-def construir_modelo(inst, nombre="cbctt", solo_duras=False):
+def construir_modelo(inst, nombre="cbctt", solo_duras=False, exacto=True):
     S = preparar(inst)
     C, R, D, T = S["C"], S["R"], S["D"], S["T"]
     m = gp.Model(nombre)
@@ -80,17 +81,19 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     # dias minimos
     y = m.addVars(C, D, vtype=GRB.BINARY, name="y")
     w = m.addVars(C, lb=0, name="w")
-    u = m.addVars(C, vtype=GRB.BINARY, name="u")
+    u = m.addVars(C, vtype=GRB.BINARY, name="u") if exacto else None
     m.addConstrs((y[c, d] <= gp.quicksum(x.sum(c, "*", t) for t in S["slots_dia"][d]) for c in C for d in D),
                  name="dia_usado")
-    m.addConstrs((y[c, d] >= x.sum(c, "*", t) for c in C for d in D for t in S["slots_dia"][d]),
-                 name="dia_usado_inf")
     for c in C:
-        mnd = inst["cursos"][c]["min_dias"]
-        n_c = y.sum(c, "*")
-        m.addConstr(w[c] >= mnd - n_c, name=f"dias_min[{c}]")
-        m.addConstr(w[c] <= mnd * u[c], name=f"dias_min_u[{c}]")
-        m.addConstr(w[c] <= mnd - n_c + mnd * (1 - u[c]), name=f"dias_min_sup[{c}]")
+        m.addConstr(w[c] >= inst["cursos"][c]["min_dias"] - y.sum(c, "*"), name=f"dias_min[{c}]")
+    if exacto:
+        m.addConstrs((y[c, d] >= x.sum(c, "*", t) for c in C for d in D for t in S["slots_dia"][d]),
+                     name="dia_usado_inf")
+        for c in C:
+            mnd = inst["cursos"][c]["min_dias"]
+            n_c = y.sum(c, "*")
+            m.addConstr(w[c] <= mnd * u[c], name=f"dias_min_u[{c}]")
+            m.addConstr(w[c] <= mnd - n_c + mnd * (1 - u[c]), name=f"dias_min_sup[{c}]")
 
     # compacidad (solo curriculos)
     curriculos = inst["curriculos"]
@@ -98,14 +101,16 @@ def construir_modelo(inst, nombre="cbctt", solo_duras=False):
     e = m.addVars(list(curriculos), T, lb=0, name="e")
     m.addConstrs((e[q, t] >= z[q, t] - gp.quicksum(z[q, s] for s in S["vecinos"][t])
                   for q in curriculos for t in T), name="aislada")
-    m.addConstrs((e[q, t] <= z[q, t] for q in curriculos for t in T), name="aislada_sup")
-    m.addConstrs((e[q, t] <= 1 - z[q, s] for q in curriculos for t in T for s in S["vecinos"][t]),
-                 name="aislada_vecino")
+    if exacto:
+        m.addConstrs((e[q, t] <= z[q, t] for q in curriculos for t in T), name="aislada_sup")
+        m.addConstrs((e[q, t] <= 1 - z[q, s] for q in curriculos for t in T for s in S["vecinos"][t]),
+                     name="aislada_vecino")
 
     # estabilidad de sala
     v = m.addVars(C, R, vtype=GRB.BINARY, name="v")
     m.addConstrs((x[c, r, t] <= v[c, r] for (c, r, t) in S["X"]), name="usa_sala")
-    m.addConstrs((v[c, r] <= x.sum(c, r, "*") for c in C for r in R), name="usa_sala_sup")
+    if exacto:
+        m.addConstrs((v[c, r] <= x.sum(c, r, "*") for c in C for r in R), name="usa_sala_sup")
 
     m.setObjective(PESO_CAPACIDAD * f_capacidad
                    + PESO_DIAS * w.sum()
@@ -120,10 +125,10 @@ ESTADOS = {GRB.OPTIMAL: "OPTIMO", GRB.TIME_LIMIT: "LIMITE_TIEMPO", GRB.INFEASIBL
            GRB.INF_OR_UNBD: "INFACTIBLE", GRB.INTERRUPTED: "INTERRUMPIDO"}
 
 
-def resolver(inst, nombre, tiempo, hilos, gap=0.0, solo_duras=False, mostrar=True):
+def resolver(inst, nombre, tiempo, hilos, gap=0.0, solo_duras=False, mostrar=True, exacto=True):
     """Arma y resuelve el modelo. Devuelve un diccionario con los resultados (lo usa src/correr.py)."""
     t0 = time.time()
-    m, x = construir_modelo(inst, nombre, solo_duras)
+    m, x = construir_modelo(inst, nombre, solo_duras, exacto)
     t_modelo = time.time() - t0
     m.Params.OutputFlag = 1 if mostrar else 0
     m.Params.TimeLimit = tiempo
@@ -168,11 +173,12 @@ def main():
     ap.add_argument("--hilos", type=int, default=4, help="Threads (usar el mismo en CPLEX)")
     ap.add_argument("--gap", type=float, default=0.0, help="MIPGap relativo (0 = demostrar optimo)")
     ap.add_argument("--solo-duras", action="store_true", help="sin restricciones blandas (iteracion 1)")
+    ap.add_argument("--version", choices=["v1", "v2"], default="v2", help="formulacion (ver comun.py)")
     args = ap.parse_args()
 
     inst = leer_ctt(args.instancia)
     nombre = Path(args.instancia).stem
-    r = resolver(inst, nombre, args.tiempo, args.hilos, args.gap, args.solo_duras)
+    r = resolver(inst, nombre, args.tiempo, args.hilos, args.gap, args.solo_duras, exacto=args.version == "v2")
     if not r["solucion"]:
         print(f"\n{nombre} [gurobi]: {r['estado']} en {r['tiempo_s']:.1f} s")
         return

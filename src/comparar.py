@@ -1,7 +1,13 @@
 """Muestra resultados/tabla.csv como comparacion lado a lado: Gurobi vs CPLEX por instancia.
 
-Toma la ultima corrida sin error de cada (instancia, solver) con el limite y los hilos pedidos,
-imprime la tabla y la guarda en resultados/comparacion.csv.
+Toma la ultima corrida sin error de cada (modelo, instancia, solver, limite, hilos), imprime la
+tabla y la guarda en resultados/comparacion.csv.
+
+"costo" es el costo REAL del horario (calculado por verificar.py) y "gap" se calcula con ese costo:
+    gap % = 100 * (costo - cota) / costo
+Con el modelo v2 coinciden con lo que reporta el solver; con v1 el solver puede sobreestimar el
+objetivo, por eso se usa el costo verificado para comparar. Si el costo es 0, el gap % no tiene
+sentido y se muestra el gap absoluto (costo - cota).
 
 Uso:
     python src/comparar.py                       # todo lo que haya
@@ -14,6 +20,18 @@ from comun import RAIZ
 
 TABLA = RAIZ / "resultados" / "tabla.csv"
 SALIDA = RAIZ / "resultados" / "comparacion.csv"
+SOLVERS = ("gurobi", "cplex")
+
+
+def gap_real(r):
+    """(gap %, gap absoluto) usando el costo verificado y la cota del solver."""
+    try:
+        costo, cota = float(r["costo_verif"]), float(r["cota"])
+    except (KeyError, ValueError):
+        return "", ""
+    absoluto = costo - cota
+    pct = 100 * absoluto / costo if costo > 0 else None
+    return ("" if pct is None else f"{pct:.2f}"), f"{absoluto:.2f}"
 
 
 def main():
@@ -29,40 +47,41 @@ def main():
                 continue
             if args.tiempo and r["limite_s"] != args.tiempo or args.hilos and r["hilos"] != args.hilos:
                 continue
-            ultimas[(r["instancia"], r["solver"], r["limite_s"], r["hilos"])] = r
+            ultimas[(r["modelo"], r["instancia"], r["solver"], r["limite_s"], r["hilos"])] = r
 
-    claves = sorted({(i, l, h) for (i, _, l, h) in ultimas})
+    claves = sorted({(i, m, l, h) for (m, i, _, l, h) in ultimas})
     filas = []
-    for inst, lim, hil in claves:
-        g = ultimas.get((inst, "gurobi", lim, hil), {})
-        c = ultimas.get((inst, "cplex", lim, hil), {})
-        filas.append({
-            "instancia": inst, "limite_s": lim, "hilos": hil,
-            "gurobi_estado": g.get("estado", "-"), "gurobi_obj": g.get("objetivo", "-"),
-            "gurobi_gap_pct": g.get("gap_pct", "-"), "gurobi_gap_abs": g.get("gap_abs", "-"), "gurobi_tiempo_s": g.get("tiempo_s", "-"),
-            "cplex_estado": c.get("estado", "-"), "cplex_obj": c.get("objetivo", "-"),
-            "cplex_gap_pct": c.get("gap_pct", "-"), "cplex_gap_abs": c.get("gap_abs", "-"), "cplex_tiempo_s": c.get("tiempo_s", "-"),
-            "verificado": "SI" if g.get("verif_ok") != "NO" and c.get("verif_ok") != "NO" else "NO",
-        })
+    for inst, mod, lim, hil in claves:
+        fila = {"instancia": inst, "modelo": mod, "limite_s": lim, "hilos": hil}
+        verif = []
+        for s in SOLVERS:
+            r = ultimas.get((mod, inst, s, lim, hil), {})
+            pct, ab = gap_real(r) if r else ("", "")
+            fila.update({f"{s}_estado": r.get("estado", "-"), f"{s}_objetivo_solver": r.get("objetivo", "-"),
+                         f"{s}_costo": r.get("costo_verif", "-"), f"{s}_cota": r.get("cota", "-"),
+                         f"{s}_gap_pct": pct, f"{s}_gap_abs": ab, f"{s}_tiempo_s": r.get("tiempo_s", "-")})
+            if r:
+                verif.append(r.get("verif_ok", ""))
+        fila["verificado"] = "NO" if "NO" in verif else ("SOBREESTIMA" if "SOBREESTIMA" in verif else "SI")
+        filas.append(fila)
 
     with open(SALIDA, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(filas[0]) if filas else ["instancia"])
         w.writeheader()
         w.writerows(filas)
 
-    def gap(r, s):
-        o, p, a = r[f"{s}_obj"], r[f"{s}_gap_pct"], r[f"{s}_gap_abs"]
-        if o in ("0", "-") or p in ("", "-"):
-            return f"abs {a}" if a not in ("", "-") else "-"
-        return p
+    def gap(fila, s):
+        if fila[f"{s}_gap_pct"]:
+            return fila[f"{s}_gap_pct"]
+        return f"abs {fila[f'{s}_gap_abs']}" if fila[f"{s}_gap_abs"] else "-"
 
-    print("gap% = gap relativo del solver; si el objetivo es 0 se muestra el gap absoluto (objetivo - cota)\n")
-    print(f"{'instancia':<10} {'lim':>5} {'hil':>3} | {'GUROBI estado':<14}{'obj':>7}{'gap%':>11}{'t(s)':>9} | "
-          f"{'CPLEX estado':<14}{'obj':>7}{'gap%':>11}{'t(s)':>9} | verif")
+    print("costo = costo real verificado; gap% = (costo - cota) / costo; si el costo es 0 se muestra el gap absoluto\n")
+    print(f"{'instancia':<10}{'modelo':<11}{'lim':>5}{'hil':>4} | {'GUROBI estado':<14}{'costo':>7}{'gap%':>11}{'t(s)':>9} | "
+          f"{'CPLEX estado':<14}{'costo':>7}{'gap%':>11}{'t(s)':>9} | verif")
     for r in filas:
-        print(f"{r['instancia']:<10} {r['limite_s']:>5} {r['hilos']:>3} | "
-              f"{r['gurobi_estado']:<14}{r['gurobi_obj']:>7}{gap(r, 'gurobi'):>11}{r['gurobi_tiempo_s']:>9} | "
-              f"{r['cplex_estado']:<14}{r['cplex_obj']:>7}{gap(r, 'cplex'):>11}{r['cplex_tiempo_s']:>9} | "
+        print(f"{r['instancia']:<10}{r['modelo']:<11}{r['limite_s']:>5}{r['hilos']:>4} | "
+              f"{r['gurobi_estado']:<14}{r['gurobi_costo']:>7}{gap(r, 'gurobi'):>11}{r['gurobi_tiempo_s']:>9} | "
+              f"{r['cplex_estado']:<14}{r['cplex_costo']:>7}{gap(r, 'cplex'):>11}{r['cplex_tiempo_s']:>9} | "
               f"{r['verificado']}")
     print(f"\nGuardado en {SALIDA.relative_to(RAIZ)}")
 

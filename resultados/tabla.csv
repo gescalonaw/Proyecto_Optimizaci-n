@@ -1,0 +1,3 @@
+fecha,instancia,solver,version,hilos,limite_s,estado,tiempo_s,objetivo,cota,gap_pct,nodos,variables,restricciones,duras_verif,costo_verif,verif_ok,tiempo_modelo_s,carga_1min,maquina,error
+2026-11-26T20:33:59,toytoy,gurobi,13.0.3,2,30,OPTIMO,0.03,4,4.00,0.00,1,82,138,0,4,SI,0.01,,"DESKTOP-DACQE9I (Intel64 Family 6 Model 142 Stepping 9, GenuineIntel)",
+2026-11-26T20:33:59,toytoy,cplex,22.2.0.0,2,30,OPTIMO,0.03,4,4.00,0.00,0,82,138,0,4,SI,0.02,,"DESKTOP-DACQE9I (Intel64 Family 6 Model 142 Stepping 9, GenuineIntel)",

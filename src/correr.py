@@ -14,6 +14,10 @@ Uso (desde la raiz del repo, en Chome dentro de tmux):
     python src/correr.py comp01 comp05 comp12 --tiempo 3600 --hilos 8        # oficial
     python src/correr.py --lista instancias/oficiales.txt --tiempo 3600 --hilos 8
     python src/correr.py comp01 --solvers cplex --tiempo 300                 # un solo solver
+    python src/correr.py comp01 comp05 --versiones v1 v2 --tiempo 300         # comparar formulaciones
+
+Columna verif_ok: SI = sin violaciones duras y objetivo = costo real; SOBREESTIMA = factible pero el
+objetivo del solver es mayor que el costo real (puede pasar con v1); NO = viola restricciones duras.
 """
 import argparse
 import csv
@@ -25,7 +29,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from comun import RAIZ, VERSION_MODELO, guardar_solucion
+from comun import RAIZ, VERSIONES, guardar_solucion
 from leer_ctt import leer_ctt
 from verificar import verificar
 
@@ -56,7 +60,7 @@ def ya_corridas():
     if not TABLA.exists():
         return set()
     with open(TABLA, newline="", encoding="utf-8") as f:
-        return {(r["instancia"], r["solver"], r["limite_s"], r["hilos"])
+        return {(r["modelo"], r["instancia"], r["solver"], r["limite_s"], r["hilos"])
                 for r in csv.DictReader(f) if r["estado"] != "ERROR"}
 
 
@@ -68,7 +72,7 @@ def archivar_si_cambio():
     with open(TABLA, newline="", encoding="utf-8") as f:
         lector = csv.DictReader(f)
         filas = list(lector)
-        mismo = lector.fieldnames == COLUMNAS and all(r["modelo"] == VERSION_MODELO for r in filas)
+        mismo = lector.fieldnames == COLUMNAS and all(r["modelo"] in VERSIONES.values() for r in filas)
     if not mismo:
         destino = TABLA.with_name(f"tabla_anterior_{datetime.now():%Y%m%d_%H%M%S}.csv")
         TABLA.rename(destino)
@@ -89,10 +93,10 @@ def fmt(v, dec=2):
     return "" if v is None else (f"{v:.{dec}f}" if isinstance(v, float) else v)
 
 
-def correr_uno(ruta, solver, tiempo, hilos, gap):
+def correr_uno(ruta, solver, tiempo, hilos, gap, version="v2"):
     inst = leer_ctt(ruta)
     nombre = ruta.stem
-    fila = {"fecha": datetime.now().isoformat(timespec="seconds"), "modelo": VERSION_MODELO, "instancia": nombre,
+    fila = {"fecha": datetime.now().isoformat(timespec="seconds"), "modelo": VERSIONES[version], "instancia": nombre,
             "solver": solver, "hilos": hilos, "limite_s": fmt(float(tiempo), 0),
             "carga_1min": fmt(os.getloadavg()[0]) if hasattr(os, "getloadavg") else "",
             "maquina": f"{socket.gethostname()} ({platform.processor() or platform.machine()})"}
@@ -101,7 +105,7 @@ def correr_uno(ruta, solver, tiempo, hilos, gap):
             import modelo_gurobi as mod
         else:
             import modelo_cplex as mod
-        r = mod.resolver(inst, nombre, tiempo, hilos, gap, mostrar=False)
+        r = mod.resolver(inst, nombre, tiempo, hilos, gap, mostrar=False, exacto=version == "v2")
         fila.update({k: fmt(r[k]) for k in ("version", "estado", "tiempo_s", "cota", "tiempo_modelo_s")})
         fila.update({"objetivo": fmt(r["objetivo"], 0) if r["objetivo"] is not None else "",
                      "gap_pct": fmt(100 * r["gap"]) if r["gap"] is not None else "",
@@ -112,8 +116,9 @@ def correr_uno(ruta, solver, tiempo, hilos, gap):
             guardar_solucion(r["solucion"], nombre, solver)
             duras, blandas, _ = verificar(inst, r["solucion"])
             d, b = sum(duras.values()), sum(blandas.values())
-            fila.update({"duras_verif": d, "costo_verif": b,
-                         "verif_ok": "SI" if d == 0 and b == round(r["objetivo"]) else "NO"})
+            obj = round(r["objetivo"])
+            ok = "NO" if d > 0 else ("SI" if b == obj else ("SOBREESTIMA" if b < obj else "NO"))
+            fila.update({"duras_verif": d, "costo_verif": b, "verif_ok": ok})
     except Exception as e:  # una corrida que falla no detiene las demas
         fila.update({"estado": "ERROR", "error": f"{type(e).__name__}: {e}"[:300]})
         traceback.print_exc()
@@ -129,6 +134,8 @@ def main():
     ap.add_argument("--tiempo", type=float, default=60, help="limite por corrida, en segundos")
     ap.add_argument("--hilos", type=int, default=8, help="el mismo para ambos solvers")
     ap.add_argument("--gap", type=float, default=0.0)
+    ap.add_argument("--versiones", nargs="+", default=["v2"], choices=["v1", "v2"],
+                    help="formulaciones a correr (ver comun.py)")
     ap.add_argument("--repetir", action="store_true", help="correr aunque ya este en la tabla")
     args = ap.parse_args()
 
@@ -140,18 +147,18 @@ def main():
         ap.error("indica instancias o --lista")
 
     hechas = set() if args.repetir else ya_corridas()
-    trabajos = [(ruta_instancia(n), s) for n in nombres for s in args.solvers]
-    pendientes = [(r, s) for r, s in trabajos
-                  if (r.stem, s, fmt(float(args.tiempo), 0), str(args.hilos)) not in hechas]
+    trabajos = [(ruta_instancia(n), s, v) for n in nombres for v in args.versiones for s in args.solvers]
+    pendientes = [(r, s, v) for r, s, v in trabajos
+                  if (VERSIONES[v], r.stem, s, fmt(float(args.tiempo), 0), str(args.hilos)) not in hechas]
     print(f"{len(trabajos)} corridas pedidas, {len(trabajos) - len(pendientes)} ya en la tabla, "
           f"{len(pendientes)} por correr (maximo ~{len(pendientes) * args.tiempo / 3600:.1f} h)")
 
-    for i, (ruta, solver) in enumerate(pendientes, 1):
-        print(f"\n[{i}/{len(pendientes)}] {ruta.stem} con {solver} "
+    for i, (ruta, solver, version) in enumerate(pendientes, 1):
+        print(f"\n[{i}/{len(pendientes)}] {ruta.stem} con {solver}, modelo {version} "
               f"({args.tiempo:.0f} s, {args.hilos} hilos) - {datetime.now():%H:%M:%S}", flush=True)
-        f = correr_uno(ruta, solver, args.tiempo, args.hilos, args.gap)
+        f = correr_uno(ruta, solver, args.tiempo, args.hilos, args.gap, version)
         print(f"   {f.get('estado')}  obj={f.get('objetivo', '')}  cota={f.get('cota', '')}  "
-              f"gap={f.get('gap_pct', '')}% (abs {f.get('gap_abs', '')})  t={f.get('tiempo_s', '')}s  verificado={f.get('verif_ok', '')}",
+              f"gap={f.get('gap_pct', '')}% (abs {f.get('gap_abs', '')})  t={f.get('tiempo_s', '')}s  costo_real={f.get('costo_verif', '')}  verificado={f.get('verif_ok', '')}",
               flush=True)
 
     print(f"\nListo. Resultados en {TABLA.relative_to(RAIZ)}")

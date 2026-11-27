@@ -6,8 +6,11 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
 
-# se anota en cada fila de resultados/tabla.csv; cambiarla si cambia la formulacion
-VERSION_MODELO = "v2-exacto"
+# versiones de la formulacion (se anotan en la columna "modelo" de resultados/tabla.csv)
+#   v1: solo cotas inferiores en las auxiliares. Mismo optimo, pero una solucion NO optima
+#       puede reportar un objetivo mayor que su costo real.
+#   v2: con cotas superiores; el objetivo de cualquier solucion es su costo real.
+VERSIONES = {"v1": "v1-base", "v2": "v2-exacto"}
 
 # pesos de las restricciones blandas (ITC-2007, track 3)
 PESO_CAPACIDAD = 1      # por alumno que no cabe en la sala
